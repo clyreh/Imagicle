@@ -1,18 +1,28 @@
 # Python
-__pycache__/
-*.pyc
 .venv/
-.env
+.venv312/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
 # Node
 node_modules/
-.next/
-out/
-web/.env.local
-# Artifacts & data
-backend/artifacts/
-training/priors/images/
-training/refiner/outputs/
-data/
-# OS/IDE
+
+# OS / IDE
 .DS_Store
+.idea/
 .vscode/
+
+# Point-E caches & outputs
+point_e_model_cache/
+data/outputs/
+*.ply
+
+# Model weights / big artifacts
+*.pt
+*.pth
+*.ckpt
+*.dylib
+*.so
