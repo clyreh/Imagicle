@@ -1,10 +1,13 @@
 # server.py
 import os
+import re
 import uuid
 import datetime
 import subprocess
 from pathlib import Path
+import sys
 
+from fastapi.responses import RedirectResponse, Response
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +25,8 @@ APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 REPO_ROOT = BACKEND_DIR.parent
 
+OUTPUT_DIR = BACKEND_DIR / "data" / "outputs" / "pointclouds"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 def _sanitize_bucket(name: str) -> str:
     # Accept "gs://bucket" or "bucket" env values; normalize to "bucket"
     return name.replace("gs://", "").strip().strip("/")
@@ -62,6 +67,15 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+@app.get("/", include_in_schema=False)
+def index():
+    # Visiting http://localhost:8000/ sends you to the Swagger docs
+    return RedirectResponse(url="/docs")
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    # Silence the 404 spam for /favicon.ico during dev
+    return Response(status_code=204)
 
 # Serve local dev artifacts (optional)
 app.mount("/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
@@ -90,57 +104,56 @@ def health():
 
 @app.post("/api/generate")
 def generate_pointcloud(req: GenerateReq):
-    # 0) Sanity checks
-    if not POINT_E_SCRIPT.exists():
-        raise HTTPException(status_code=500, detail=f"Point-E script not found at {POINT_E_SCRIPT}")
+    if not OUTPUT_DIR.exists():
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1) Unique job id + local tmp output
     job_id = str(uuid.uuid4())[:8]
     user = (req.user_id or "anon").replace("/", "_")
-    local_out = Path(f"/tmp/pointcloud_{job_id}.ply")
+    local_out = OUTPUT_DIR / f"{job_id}.ply"
 
-    # 2) Build Point-E command
-    cmd = ["python3", str(POINT_E_SCRIPT), "--prompt", req.prompt, "--out", str(local_out)]
-    if req.guidance is not None:
-        cmd += ["--guidance", str(req.guidance)]
-    if req.seed is not None:
-        cmd += ["--seed", str(req.seed)]
-    if req.no_upsample:
-        cmd += ["--no_upsample"]
+    # Run Point-E via your current interpreter; set cwd so relative paths resolve
+    cmd = [
+        sys.executable, "-m", "point_e.evals.scripts.generate",
+        "--prompt", req.prompt,
+        "--out", str(local_out),
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
 
-    # 3) Run Point-E synchronously (capture logs for debugging)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # If our expected file isn't there, parse the actual saved path from stdout
+    if not local_out.exists():
+        m = re.search(r"Saved:\s*(.+\.ply)", proc.stdout or "")
+        if m:
+            candidate = Path(m.group(1))
+            if not candidate.is_absolute():
+                candidate = (REPO_ROOT / candidate).resolve()
+            if candidate.exists():
+                local_out = candidate
+
     if proc.returncode != 0 or not local_out.exists():
         msg = (proc.stderr or proc.stdout or "Point-E failed")[:4000]
         raise HTTPException(status_code=500, detail=f"Point-E error:\n{msg}")
 
-    # 4) Upload to GCS
+    # Upload to GCS (same as before)
     object_path = f"pointclouds/{user}/{job_id}/output.ply"
-    client = storage.Client()  # On GCE, uses the VM's service account
+    client = storage.Client()
     bucket = client.bucket(BUCKET)
     blob = bucket.blob(object_path)
     blob.content_type = "application/octet-stream"
     blob.upload_from_filename(str(local_out))
 
-    # 5) Optional: keep a local copy for quick dev viewing
-    try:
-        (ARTIFACTS_DIR / f"{job_id}.ply").write_bytes(local_out.read_bytes())
-    except Exception:
-        pass  # non-fatal
-
-    # 6) Return a short-lived signed URL
     url = blob.generate_signed_url(
         version="v4",
         expiration=datetime.timedelta(minutes=15),
         method="GET",
         response_disposition='inline; filename="output.ply"',
     )
-    return {
-        "job_id": job_id,
-        "gcs_uri": f"gs://{BUCKET}/{object_path}",
-        "url": url
-    }
-
+    return {"job_id": job_id, "gcs_uri": f"gs://{BUCKET}/{object_path}", "url": url}
 @app.get("/api/pointcloud/url")
 def sign_existing(object_path: str = Query(..., description="e.g. pointclouds/anon/<job>/output.ply")):
     """Sign an existing object path and return a temporary GET URL."""
