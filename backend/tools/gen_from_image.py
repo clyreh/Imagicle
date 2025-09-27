@@ -77,7 +77,7 @@ def main():
 
     images = load_image_grid(img_path)
     last = None
-    for x in sampler.sample_batch_progressive(batch_size=1, model_kwargs=dict(images=[images])):
+    for x in sampler.sample_batch_progressive(batch_size=1, model_kwargs=dict(images=images)):
         last = x
 
     pc = sampler.output_to_point_clouds(last)[0]
