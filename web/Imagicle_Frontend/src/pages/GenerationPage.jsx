@@ -21,15 +21,18 @@ const ImageGeneratorPage = () => {
     setShowModelModal(false);
 
     try {
-      // Replace with your backend API endpoint
-      const response = await fetch("/api/generate-model", {
+        const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: prompt,}),
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
-      setPlyUrl(data.modelUrl); // This should be the URL to your .ply file
+      setPlyUrl(data.url);
       // Automatically open the modal when model is generated
       setTimeout(() => setShowModelModal(true), 500);
     } catch (err) {
