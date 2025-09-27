@@ -5,6 +5,8 @@ from point_e.diffusion.sampler import PointCloudSampler
 from point_e.models.configs import MODEL_CONFIGS, model_from_config
 from point_e.models.download import load_checkpoint
 
+from lora.inject import inject_lora  
+
 def get_device():
     if torch.cuda.is_available(): return torch.device("cuda")
     if torch.backends.mps.is_available(): return torch.device("mps")
@@ -15,6 +17,16 @@ def build_sampler(device):
     base_model = model_from_config(MODEL_CONFIGS[base_name], device); base_model.eval()
     base_diffusion = diffusion_from_config(DIFFUSION_CONFIGS[base_name])
     base_model.load_state_dict(load_checkpoint(base_name, device))
+
+    # >>> LoRA hook  <<<
+    lora_path = os.environ.get("POINT_E_LORA", "").strip()
+    if lora_path:
+        # inject LoRA layers with the same r/alpha used in training
+        base_model = inject_lora(base_model, r=16, alpha=16, dropout=0.0, verbose=False)
+        sd = torch.load(lora_path, map_location="cpu")
+        # load only LoRA keys; state_dict has matching names because inject_lora renamed the modules
+        base_model.load_state_dict(sd, strict=False)
+        print(f"[LoRA] loaded adapter: {lora_path}")
 
     upsampler_model = model_from_config(MODEL_CONFIGS[upsampler_name], device); upsampler_model.eval()
     upsampler_diffusion = diffusion_from_config(DIFFUSION_CONFIGS[upsampler_name])
