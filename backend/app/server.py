@@ -1,6 +1,5 @@
 # server.py
 import os
-import re
 import uuid
 import datetime
 import subprocess
@@ -18,24 +17,23 @@ from google.cloud import storage
 
 # Resolve directories based on this file's location:
 #   .../Imagicle/backend/app/server.py
-# so APP_DIR = .../backend/app
-#    BACKEND_DIR = .../backend
-#    REPO_ROOT = .../Imagicle
 APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 REPO_ROOT = BACKEND_DIR.parent
 
+# Vendored point-e: <repo>/backend/vendor/point-e (contains top-level package folder `point_e`)
+VENDORED_POINT_E_DIR = BACKEND_DIR / "vendor" / "point-e"
+
 OUTPUT_DIR = BACKEND_DIR / "data" / "outputs" / "pointclouds"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 def _sanitize_bucket(name: str) -> str:
     # Accept "gs://bucket" or "bucket" env values; normalize to "bucket"
     return name.replace("gs://", "").strip().strip("/")
 
 BUCKET = _sanitize_bucket(os.getenv("POINTCLOUD_BUCKET", "imagicle-473400-pointclouds-dev"))
 
-# Resolve Point-E script:
-# - If POINT_E_SCRIPT env is set and relative, treat it as relative to REPO_ROOT
-# - Otherwise default to backend/vendor/point-e/... under this repo
+# If you ever want to invoke the file directly instead of -m:
 _env_point_e = os.getenv("POINT_E_SCRIPT")
 if _env_point_e:
     _p = Path(_env_point_e)
@@ -64,9 +62,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["*"],  # allow OPTIONS preflight too
     allow_headers=["*"],
 )
+
 @app.get("/", include_in_schema=False)
 def index():
     # Visiting http://localhost:8000/ sends you to the Swagger docs
@@ -99,61 +98,84 @@ def health():
         "service": "imagicle",
         "bucket": BUCKET,
         "point_e_script": str(POINT_E_SCRIPT),
+        "vendored_point_e_dir": str(VENDORED_POINT_E_DIR),
         "artifacts_dir": str(ARTIFACTS_DIR),
     }
 
 @app.post("/api/generate")
 def generate_pointcloud(req: GenerateReq):
-    if not OUTPUT_DIR.exists():
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     job_id = str(uuid.uuid4())[:8]
     user = (req.user_id or "anon").replace("/", "_")
     local_out = OUTPUT_DIR / f"{job_id}.ply"
 
-    # Run Point-E via your current interpreter; set cwd so relative paths resolve
-    cmd = [
-        sys.executable, "-m", "point_e.evals.scripts.generate",
-        "--prompt", req.prompt,
-        "--out", str(local_out),
-    ]
+    # Build the command, passing through optional knobs
+    cmd = [sys.executable, "-m", "point_e.evals.scripts.generate", "--out", str(local_out)]
+    cmd += ["--prompt", req.prompt]
+    if req.guidance is not None:
+        cmd += ["--guidance", str(req.guidance)]
+    if req.seed is not None:
+        cmd += ["--seed", str(req.seed)]
+    if req.no_upsample:
+        cmd += ["--no_upsample"]
+
+    # Ensure the vendored package is importable even if not pip-installed
+    env = {
+        **os.environ,
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": f"{VENDORED_POINT_E_DIR}:{os.environ.get('PYTHONPATH','')}",
+    }
+
+    # Run from the repo root; absolute --out prevents path confusion
     proc = subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env=env,
     )
 
-    # If our expected file isn't there, parse the actual saved path from stdout
-    if not local_out.exists():
-        m = re.search(r"Saved:\s*(.+\.ply)", proc.stdout or "")
-        if m:
-            candidate = Path(m.group(1))
-            if not candidate.is_absolute():
-                candidate = (REPO_ROOT / candidate).resolve()
-            if candidate.exists():
-                local_out = candidate
-
-    if proc.returncode != 0 or not local_out.exists():
+    # Hard failure if Point-E errored or output missing/empty
+    if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout or "Point-E failed")[:4000]
         raise HTTPException(status_code=500, detail=f"Point-E error:\n{msg}")
+    if not local_out.exists() or local_out.stat().st_size == 0:
+        msg = (proc.stderr or proc.stdout or "Output not found or empty")[:4000]
+        raise HTTPException(status_code=500, detail=f"Point-E output missing:\n{msg}")
 
-    # Upload to GCS (same as before)
+    # Upload to GCS under a stable, frontend-friendly key
     object_path = f"pointclouds/{user}/{job_id}/output.ply"
-    client = storage.Client()
-    bucket = client.bucket(BUCKET)
-    blob = bucket.blob(object_path)
-    blob.content_type = "application/octet-stream"
-    blob.upload_from_filename(str(local_out))
+    try:
+        client = storage.Client()
+        bucket = client.bucket(BUCKET)
+        blob = bucket.blob(object_path)
+        blob.content_type = "application/octet-stream"
+        blob.cache_control = "public, max-age=86400"
+        blob.upload_from_filename(str(local_out))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GCS upload failed: {e}")
 
+    # Signed URL for the FE to fetch directly from GCS
     url = blob.generate_signed_url(
         version="v4",
         expiration=datetime.timedelta(minutes=15),
         method="GET",
         response_disposition='inline; filename="output.ply"',
     )
-    return {"job_id": job_id, "gcs_uri": f"gs://{BUCKET}/{object_path}", "url": url}
+
+    # (Optional) Keep a local dev artifact you already expose at /artifacts
+    try:
+        (ARTIFACTS_DIR / f"{job_id}.ply").write_bytes(local_out.read_bytes())
+    except Exception:
+        pass  # non-fatal
+
+    return {
+        "job_id": job_id,
+        "gcs_uri": f"gs://{BUCKET}/{object_path}",
+        "url": url,  # FE should fetch this
+    }
+
 @app.get("/api/pointcloud/url")
 def sign_existing(object_path: str = Query(..., description="e.g. pointclouds/anon/<job>/output.ply")):
     """Sign an existing object path and return a temporary GET URL."""
