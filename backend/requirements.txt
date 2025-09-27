@@ -1,6 +1,9 @@
 FastAPI
 uvicorn
+google-cloud-storage
+pydantic>=2
 numpy
 torch
 open3d
 point-e
+plyfile

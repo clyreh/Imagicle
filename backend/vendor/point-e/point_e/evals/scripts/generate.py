@@ -7,7 +7,7 @@ from point_e.diffusion.sampler import PointCloudSampler
 from point_e.models.configs import MODEL_CONFIGS, model_from_config
 from point_e.models.download import load_checkpoint
 
-from lora.inject import inject_lora  # optional LoRA
+#from lora.inject import inject_lora  # optional LoRA
 
 def get_device():
     if torch.cuda.is_available(): return torch.device("cuda")
@@ -25,35 +25,23 @@ def write_ascii_ply(path, coords_f32, colors_u8):
     PlyData([PlyElement.describe(verts, 'vertex')], text=True).write(path)
 
 def build_sampler(device):
-    # Keep the fast text-conditioned base; the 300M/image models expect images
-    base_name, upsampler_name = 'base40M-textvec', 'upsample'
+    base_name = 'base40M-textvec'
 
     base_model = model_from_config(MODEL_CONFIGS[base_name], device); base_model.eval()
     base_diff  = diffusion_from_config(DIFFUSION_CONFIGS[base_name])
     base_model.load_state_dict(load_checkpoint(base_name, device))
 
-    # >>> LoRA hook (optional) <<<
-    lora_path = os.environ.get("POINT_E_LORA", "").strip()
-    if lora_path:
-        base_model = inject_lora(base_model, r=16, alpha=16, dropout=0.0, verbose=False)
-        sd = torch.load(lora_path, map_location="cpu")
-        base_model.load_state_dict(sd, strict=False)
-        print(f"[LoRA] loaded adapter:", lora_path)
-
-    up_model  = model_from_config(MODEL_CONFIGS[upsampler_name], device); up_model.eval()
-    up_diff   = diffusion_from_config(DIFFUSION_CONFIGS[upsampler_name])
-    up_model.load_state_dict(load_checkpoint(upsampler_name, device))
-
-    # Two stages → two entries in each per-stage list (use_karras length must match)
+    # Single-stage sampler
     return PointCloudSampler(
         device=device,
-        models=[base_model, up_model],
-        diffusions=[base_diff,  up_diff],
-        num_points=[1024, 4096-1024],      # ~4k total points
-        aux_channels=['R','G','B'],
-        guidance_scale=[3.0, 0.0],         # CFG on base stage only
-        use_karras=[True, True],           # REQUIRED: one bool per stage
-        model_kwargs_key_filter=('texts','')
+        models=[base_model],              # 1 stage
+        diffusions=[base_diff],           # 1 stage
+        num_points=[4096],                # 1 entry
+        aux_channels=['R', 'G', 'B'],
+        guidance_scale=[3.0],             # 1 entry
+        use_karras=[False],               # you can set True if you prefer; either way…
+        karras_steps=[64],                # …must still be length-1 for this version
+        model_kwargs_key_filter=('texts',),  # 1-tuple (trailing comma matters)
     )
 
 def main():
