@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os, sys, numpy as np, torch
 from PIL import Image
-import open3d as o3d
+from plyfile import PlyData, PlyElement
 
 from point_e.diffusion.configs import DIFFUSION_CONFIGS, diffusion_from_config
 from point_e.diffusion.sampler import PointCloudSampler
@@ -14,20 +14,23 @@ def get_device():
     return torch.device("cpu")
 
 def load_image_grid(path, size=224):
-    """Return a list (grid) of PIL images; for 1 image it's a 1x1 grid."""
     img = Image.open(path).convert("RGB").resize((size, size))
-    return [img]  # sampler expects list-of-images (grid)
+    return [img]  # flat list (grid of 1 image)
 
-def to_open3d_point_cloud(pc):
-    coords = pc.coords
-    r = pc.channels['R'].astype(np.float32)/255.0
-    g = pc.channels['G'].astype(np.float32)/255.0
-    b = pc.channels['B'].astype(np.float32)/255.0
-    colors = np.stack([r,g,b], axis=1)
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(coords)
-    pcd.colors = o3d.utility.Vector3dVector(colors)
-    return pcd
+def write_ply(path, coords_f32, colors_u8):
+    assert coords_f32.shape[1] == 3 and colors_u8.shape[1] == 3
+    verts = np.empty(coords_f32.shape[0], dtype=[
+        ('x','f4'),('y','f4'),('z','f4'),
+        ('red','u1'),('green','u1'),('blue','u1')
+    ])
+    verts['x'] = coords_f32[:,0]
+    verts['y'] = coords_f32[:,1]
+    verts['z'] = coords_f32[:,2]
+    verts['red']   = colors_u8[:,0]
+    verts['green'] = colors_u8[:,1]
+    verts['blue']  = colors_u8[:,2]
+    el = PlyElement.describe(verts, 'vertex')
+    PlyData([el], text=True).write(path)  # ASCII PLY
 
 def main():
     img_path = os.environ.get("POINT_E_IMAGE", "").strip()
@@ -43,15 +46,14 @@ def main():
     print("Using device:", device)
     print("Image:", img_path)
 
-    # Image-conditioned base (expects 'images' in model_kwargs) + upsampler
-    base_name      = "base300M"
+    base_name      = "base300M"   # image-conditioned base
     upsampler_name = "upsample"
 
     base_model = model_from_config(MODEL_CONFIGS[base_name], device); base_model.eval()
     base_diff  = diffusion_from_config(DIFFUSION_CONFIGS[base_name])
     base_model.load_state_dict(load_checkpoint(base_name, device))
 
-    # Optional: apply LoRA adapter for image-cond base
+    # Optional image-cond LoRA
     lora_path = os.environ.get("POINT_E_LORA_IMAGE", "").strip()
     if lora_path:
         from lora.inject import inject_lora
@@ -70,20 +72,23 @@ def main():
         diffusions=[base_diff, up_diff],
         num_points=[1024, 4096-1024],
         aux_channels=['R','G','B'],
-        guidance_scale=[0.0, 0.0],      # image-cond usually with little/no CFG
+        guidance_scale=[0.0, 0.0],
         use_karras=[True, True],
         model_kwargs_key_filter=('images', '')
     )
 
     images = load_image_grid(img_path)
     last = None
+    # IMPORTANT: pass the flat list (not list-of-lists)
     for x in sampler.sample_batch_progressive(batch_size=1, model_kwargs=dict(images=images)):
         last = x
 
     pc = sampler.output_to_point_clouds(last)[0]
-    pcd = to_open3d_point_cloud(pc)
-    o3d.io.write_point_cloud(out_path, pcd, write_ascii=True)
-    print("Saved:", out_path, "points:", len(pc.coords))
+    coords = pc.coords.astype(np.float32)
+    colors = np.stack([pc.channels['R'], pc.channels['G'], pc.channels['B']], axis=1).astype(np.uint8)
+
+    write_ply(out_path, coords, colors)
+    print("Saved:", out_path, "points:", len(coords))
 
 if __name__ == "__main__":
     main()
