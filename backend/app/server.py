@@ -102,6 +102,8 @@ def health():
         "artifacts_dir": str(ARTIFACTS_DIR),
     }
 
+# ...existing imports and config...
+
 @app.post("/api/generate")
 def generate_pointcloud(req: GenerateReq):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -120,14 +122,12 @@ def generate_pointcloud(req: GenerateReq):
     if req.no_upsample:
         cmd += ["--no_upsample"]
 
-    # Ensure the vendored package is importable even if not pip-installed
     env = {
         **os.environ,
         "PYTHONUNBUFFERED": "1",
         "PYTHONPATH": f"{VENDORED_POINT_E_DIR}:{os.environ.get('PYTHONPATH','')}",
     }
 
-    # Run from the repo root; absolute --out prevents path confusion
     proc = subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),
@@ -136,7 +136,6 @@ def generate_pointcloud(req: GenerateReq):
         env=env,
     )
 
-    # Hard failure if Point-E errored or output missing/empty
     if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout or "Point-E failed")[:4000]
         raise HTTPException(status_code=500, detail=f"Point-E error:\n{msg}")
@@ -144,7 +143,6 @@ def generate_pointcloud(req: GenerateReq):
         msg = (proc.stderr or proc.stdout or "Output not found or empty")[:4000]
         raise HTTPException(status_code=500, detail=f"Point-E output missing:\n{msg}")
 
-    # Upload to GCS under a stable, frontend-friendly key
     object_path = f"pointclouds/{user}/{job_id}/output.ply"
     try:
         client = storage.Client()
@@ -156,7 +154,6 @@ def generate_pointcloud(req: GenerateReq):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"GCS upload failed: {e}")
 
-    # Signed URL for the FE to fetch directly from GCS
     url = blob.generate_signed_url(
         version="v4",
         expiration=datetime.timedelta(minutes=15),
@@ -164,7 +161,7 @@ def generate_pointcloud(req: GenerateReq):
         response_disposition='inline; filename="output.ply"',
     )
 
-    # (Optional) Keep a local dev artifact you already expose at /artifacts
+    # Save a local dev artifact (optional)
     try:
         (ARTIFACTS_DIR / f"{job_id}.ply").write_bytes(local_out.read_bytes())
     except Exception:
@@ -175,6 +172,8 @@ def generate_pointcloud(req: GenerateReq):
         "gcs_uri": f"gs://{BUCKET}/{object_path}",
         "url": url,  # FE should fetch this
     }
+
+# ...existing code...
 
 @app.get("/api/pointcloud/url")
 def sign_existing(object_path: str = Query(..., description="e.g. pointclouds/anon/<job>/output.ply")):
