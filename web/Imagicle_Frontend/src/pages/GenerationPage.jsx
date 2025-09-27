@@ -2,6 +2,13 @@ import React, { useState, useRef, useEffect } from "react";
 import { Play, Download, X, RotateCcw, Maximize2 } from "lucide-react";
 import * as THREE from "three";
 
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+// add this near the top of the file:
+console.log("VITE_API_BASE =", API_BASE);
+// optional: expose to console for quick checks
+window.API_BASE = API_BASE;
+
+
 const ImageGeneratorPage = () => {
   const [prompt, setPrompt] = useState("");
   const [plyUrl, setPlyUrl] = useState("");
@@ -21,24 +28,25 @@ const ImageGeneratorPage = () => {
     setShowModelModal(false);
 
     try {
-        const response = await fetch("/api/generate", {
+      // CHANGED: use API_BASE and show backend error body
+      const response = await fetch(`${API_BASE}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt,}),
+        body: JSON.stringify({ prompt }),
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const text = await response.text();
+        throw new Error(`HTTP ${response.status}: ${text}`);
       }
 
       const data = await response.json();
-      console.log("API Response:", data); // Debugging log
+      console.log("API Response:", data);
       setPlyUrl(data.url);
-      // Automatically open the modal when model is generated
       setTimeout(() => setShowModelModal(true), 500);
     } catch (err) {
       console.error(err);
-      alert("Error generating 3D model.");
+      alert(`Error generating 3D model:\n${err.message ?? err}`);
     } finally {
       setLoading(false);
     }
