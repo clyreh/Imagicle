@@ -4,6 +4,7 @@ from point_e.diffusion.configs import DIFFUSION_CONFIGS, diffusion_from_config
 from point_e.diffusion.sampler import PointCloudSampler
 from point_e.models.configs import MODEL_CONFIGS, model_from_config
 from point_e.models.download import load_checkpoint
+import re, pathlib
 
 from lora.inject import inject_lora  
 
@@ -33,6 +34,12 @@ def build_sampler(device):
     upsampler_model.load_state_dict(load_checkpoint(upsampler_name, device))
 
     return PointCloudSampler(
+        p = pathlib.Path('backend/tools/gen_base_only.py')
+        s = p.read_text()
+        s = s.replace(
+            "model_kwargs_key_filter=('texts', '')",
+            "use_karras=[True],\n        model_kwargs_key_filter=('texts', '')"
+        )
         device=device,
         models=[base_model, upsampler_model],
         diffusions=[base_diffusion, upsampler_diffusion],
