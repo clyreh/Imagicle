@@ -32,6 +32,7 @@ const ImageGeneratorPage = () => {
       }
 
       const data = await response.json();
+      console.log("API Response:", data); // Debugging log
       setPlyUrl(data.url);
       // Automatically open the modal when model is generated
       setTimeout(() => setShowModelModal(true), 500);
