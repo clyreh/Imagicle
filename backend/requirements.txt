@@ -1,5 +1,6 @@
-fastapi
-uvicorn[standard]
+FastAPI
+uvicorn
 numpy
-open3d==0.19.0
 torch
+open3d
+point-e
