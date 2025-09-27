@@ -1,4 +1,4 @@
-export default function App() {
+/*export default function App() {
   return (
     <main className="p-6 font-sans">
       <h1 className="text-3xl font-bold text-indigo-500">imagicle</h1>
@@ -7,4 +7,12 @@ export default function App() {
       </p>
     </main>
   );
+}*/
+
+import React from "react";
+import GenerationPage from "./pages/GenerationPage.jsx";
+
+export default function App() {
+  return <GenerationPage />;
 }
+
