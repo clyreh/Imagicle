@@ -29,9 +29,9 @@ I contributed to the **UI/UX design and frontend development**, focusing on **re
 
 ## **Project Links**
 
-* 🔗 **Original Full-Stack Repository (Team Repo):** https://github.com/Kennethbaole/Imagicle
-* 🎨 **This Repository (My Frontend Contributions):** https://github.com/clyreh/Imagicle/tree/frontend
-* 📽 **Devpost Submission (Demos & Visuals):** https://devpost.com/software/imagicle?ref_content=my-projects-tab&ref_feature=my_projects
+* 🔗 **Original Full-Stack Repository (Team Repo):** [https://github.com/Kennethbaole/Imagicle]
+* 🎨 **This Repository (My Frontend Contributions):** [https://github.com/clyreh/Imagicle/tree/frontend]
+* 📽 **Devpost Submission (Demos & Visuals):** [https://devpost.com/software/imagicle?ref_content=my-projects-tab&ref_feature=my_projects]
 
 ---
 
