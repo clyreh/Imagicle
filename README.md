@@ -8,8 +8,9 @@
 
 ## **My Role – UI/UX & Frontend Developer**
 
-![Figma Design Preview] (<img width="263" height="327" alt="image" src="https://github.com/user-attachments/assets/80200924-8e98-4349-83df-037b8925ba49" />
+![Figma Design Preview] (<img width="260" height="320" alt="image" src="https://github.com/user-attachments/assets/80200924-8e98-4349-83df-037b8925ba49" />
 )
+
 I contributed to the **UI/UX design and frontend development**, focusing on **responsiveness, interactivity, and visual design**.
 
 ### **Key Contributions**
