@@ -8,6 +8,8 @@
 
 ## **My Role – UI/UX & Frontend Developer**
 
+![Figma Design Preview] (<img width="263" height="327" alt="image" src="https://github.com/user-attachments/assets/80200924-8e98-4349-83df-037b8925ba49" />
+)
 I contributed to the **UI/UX design and frontend development**, focusing on **responsiveness, interactivity, and visual design**.
 
 ### **Key Contributions**
@@ -16,6 +18,7 @@ I contributed to the **UI/UX design and frontend development**, focusing on **re
 * Built a **custom typewriter animation** on the homepage to enhance **interactivity** and reinforce the **project theme**
 * Embedded a **Three.js viewer** to display `.ply` models with **rotation controls, scaling, and fullscreen mode**
 * Designed cohesive visuals with **Jersey 15 typography, gradient buttons, and particle background**
+* Designed a **Gallery Page concept** in Figma for showcasing generated 3D models → not implemented during the hackathon due to incomplete backend functionality
 
 ---
 
